@@ -1,0 +1,11 @@
+{
+  "name": "Llamiv - Keyboard Navigation",
+  "description": "Navigate your desktop using only the keyboard. Vim-like activation and scrolling.",
+  "uuid": "llamiv@xhl.studio",
+  "shell-version": [
+    "46",
+    "47"
+  ],
+  "url": "https://github.com/your/repo",
+  "version": 1
+}

@@ -1,0 +1,15 @@
+.llamiv-hint-label {
+    background-color: #ffd700;
+    color: #000000;
+    border-radius: 3px;
+    padding: 2px 4px;
+    font-size: 14px;
+    font-weight: bold;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+    border: 1px solid #b8860b;
+}
+
+.llamiv-hint-label:selected {
+    background-color: #ff4500;
+    color: #ffffff;
+}

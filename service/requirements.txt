@@ -1,0 +1,3 @@
+pygobject
+evdev
+python-json-logger

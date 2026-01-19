@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="llamiv">
+  <schema id="org.gnome.shell.extensions.llamiv" path="/org/gnome/shell/extensions/llamiv/">
+    <key name="activate-mode-key" type="as">
+      <default><![CDATA[['<Super>f']]]></default>
+      <summary>Shortcut to activate navigation mode</summary>
+    </key>
+    <key name="scroll-mode-key" type="as">
+      <default><![CDATA[['<Super>j']]]></default>
+      <summary>Shortcut to activate scroll mode</summary>
+    </key>
+  </schema>
+</schemalist>
