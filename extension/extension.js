@@ -10,51 +10,112 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 // --- IPC Client ---
 class IpcClient {
     constructor() {
-        this._sockPath = '/tmp/llamiv.sock';
+        const runtimeDir = GLib.get_user_runtime_dir();
+        this._sockPath = runtimeDir ? GLib.build_filenamev([runtimeDir, 'llamiv.sock']) : '/tmp/llamiv.sock';
+        this._timeoutMs = 5000;
+        this._maxResponseBytes = 1024 * 1024;
     }
 
     async send(command, params = {}) {
         return new Promise((resolve, reject) => {
-            try {
-                const address = Gio.UnixSocketAddress.new(this._sockPath);
-                const client = new Gio.SocketClient();
-                
-                client.connect_async(address, null, (obj, res) => {
+            const cancellable = new Gio.Cancellable();
+            const address = Gio.UnixSocketAddress.new(this._sockPath);
+            const client = new Gio.SocketClient();
+            let timeoutId = null;
+
+            timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._timeoutMs, () => {
+                cancellable.cancel();
+                reject(new Error('IPC timeout'));
+                return GLib.SOURCE_REMOVE;
+            });
+
+            client.connect_async(address, cancellable, (obj, res) => {
+                (async () => {
+                    let conn = null;
                     try {
-                        const conn = client.connect_finish(res);
+                        conn = client.connect_finish(res);
                         const output = conn.get_output_stream();
-                        const input = conn.get_input_stream();
-                        
-                        const msg = JSON.stringify({ command, ...params });
+                        const input = new Gio.DataInputStream({ base_stream: conn.get_input_stream() });
+
+                        const msg = JSON.stringify({ command, params });
                         const msgBytes = new TextEncoder().encode(msg);
                         const lenBytes = new Uint8Array(4);
                         const view = new DataView(lenBytes.buffer);
-                        view.setUint32(0, msgBytes.length, false); 
-                        
-                        output.write_all(lenBytes, null);
-                        output.write_all(msgBytes, null);
-                        
-                        const respLenBytes = input.read_bytes(4, null).get_data();
-                        if (!respLenBytes) {
-                            reject(new Error("Empty response"));
-                            return;
-                        }
+                        view.setUint32(0, msgBytes.length, false);
+
+                        await this._writeAllAsync(output, lenBytes, cancellable);
+                        await this._writeAllAsync(output, msgBytes, cancellable);
+
+                        const respLenBytes = await this._readExactAsync(input, 4, cancellable);
                         const respLenView = new DataView(respLenBytes.buffer);
                         const respLen = respLenView.getUint32(0, false);
-                        
-                        const respData = input.read_bytes(respLen, null).get_data();
+
+                        if (respLen > this._maxResponseBytes) {
+                            throw new Error(`Response too large: ${respLen}`);
+                        }
+
+                        const respData = await this._readExactAsync(input, respLen, cancellable);
                         const respStr = new TextDecoder().decode(respData);
                         resolve(JSON.parse(respStr));
-                        
-                        conn.close(null);
+                    } catch (e) {
+                        reject(e);
+                    } finally {
+                        if (timeoutId) {
+                            GLib.source_remove(timeoutId);
+                        }
+                        if (conn) {
+                            conn.close(null);
+                        }
+                    }
+                })();
+            });
+        });
+    }
+
+    _writeAllAsync(stream, bytes, cancellable) {
+        return new Promise((resolve, reject) => {
+            stream.write_all_async(bytes, GLib.PRIORITY_DEFAULT, cancellable, (obj, res) => {
+                try {
+                    stream.write_all_finish(res);
+                    resolve();
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+    }
+
+    async _readExactAsync(stream, length, cancellable) {
+        const chunks = [];
+        let total = 0;
+
+        while (total < length) {
+            const remaining = length - total;
+            const bytes = await new Promise((resolve, reject) => {
+                stream.read_bytes_async(remaining, GLib.PRIORITY_DEFAULT, cancellable, (obj, res) => {
+                    try {
+                        resolve(stream.read_bytes_finish(res));
                     } catch (e) {
                         reject(e);
                     }
                 });
-            } catch (e) {
-                reject(e);
+            });
+            const data = bytes.get_data();
+            if (!data || data.byteLength === 0) {
+                throw new Error('Socket closed');
             }
-        });
+            const chunk = data instanceof Uint8Array ? data : new Uint8Array(data);
+            chunks.push(chunk);
+            total += chunk.byteLength;
+        }
+
+        const result = new Uint8Array(length);
+        let offset = 0;
+        for (const chunk of chunks) {
+            result.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        return result;
     }
 }
 
@@ -74,13 +135,20 @@ class ServiceManager {
                 null,
                 ['python3', mainScript],
                 null,
-                GLib.SpawnFlags.SEARCH_PATH | GLib.SpawnFlags.DO_NOT_REAP_CHILD,
+                GLib.SpawnFlags.SEARCH_PATH,
                 null
             );
 
             if (success) {
                 this._proc = pid;
                 console.log(`[Llamiv] Service started with PID ${pid}`);
+                GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid, (childPid, status) => {
+                    GLib.spawn_close_pid(childPid);
+                    console.log(`[Llamiv] Service exited with status ${status}`);
+                    if (this._proc === childPid) {
+                        this._proc = null;
+                    }
+                });
             }
         } catch (e) {
             console.error(`[Llamiv] Error spawning service: ${e}`);
@@ -89,7 +157,11 @@ class ServiceManager {
 
     stop() {
         if (this._proc) {
-            GLib.spawn_command_line_async(`kill ${this._proc}`);
+            try {
+                GLib.spawn_command_line_async(`kill -TERM ${this._proc}`);
+            } catch (e) {
+                console.warn(`[Llamiv] Failed to terminate service: ${e}`);
+            }
             this._proc = null;
         }
     }

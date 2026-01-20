@@ -27,6 +27,7 @@ CLICKABLE_ROLES = {
 class AtspiScanner:
     def __init__(self):
         self.root = None
+        self._active_object_map = {}
         try:
             Atspi.init()
             self.root = Atspi.get_desktop(0)
@@ -40,6 +41,7 @@ class AtspiScanner:
         Returns a list of dicts: {'id': str, 'x': int, 'y': int, 'w': int, 'h': int, 'name': str}
         """
         elements = []
+        self._active_object_map = {}
         if not self.root:
             logger.error("AT-SPI root not initialized.")
             return []
@@ -102,7 +104,7 @@ class AtspiScanner:
             
             # Skip invisible elements
             if Atspi.StateType.VISIBLE not in states and Atspi.StateType.SHOWING not in states:
-                # Sometimes containers are not "showing" but have showing children? 
+                # Sometimes containers are not "showing" but have showing children?
                 # Usually if a parent is not showing, children aren't either.
                 return
 
@@ -123,9 +125,7 @@ class AtspiScanner:
                     self._scan_recursive(child, results, depth + 1, depth_limit)
 
         except Exception as e:
-            # Stale objects or IPC errors can happen
-            # logger.debug(f"Error traversing object: {e}")
-            pass
+            logger.debug(f"Error traversing object: {e}")
 
     def _add_element_if_valid(self, obj: Atspi.Accessible, results: List[Dict[str, Any]]):
         try:
@@ -137,12 +137,12 @@ class AtspiScanner:
             # DESKTOP_COORDS = 0
             x, y, w, h = component.get_extents(Atspi.CoordType.SCREEN)
             
-            # Filter invalid or off-screen coordinates
-            if w <= 0 or h <= 0 or x < 0 or y < 0:
+            # Filter invalid coordinates
+            if w <= 0 or h <= 0:
                 return
-                
-            # TODO: Verify if coordinates are within current screen bounds?
-            # For now, just accept them.
+
+            obj_id = str(hash(obj))
+            self._active_object_map[obj_id] = obj
 
             results.append({
                 'name': obj.get_name(),
@@ -154,10 +154,25 @@ class AtspiScanner:
                 # Use a path or unique ID if possible, but Atspi paths are complex.
                 # We might need to store the raw object in a temporary map if we want to invoke actions on it later.
                 # For JSON serialization, we just send coords.
-                'id': hash(obj) # Simple hash for now, but not persistent
+                'id': obj_id
             })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Error extracting element bounds: {e}")
+
+    def get_object_by_id(self, obj_id: str) -> Optional[Atspi.Accessible]:
+        return self._active_object_map.get(obj_id)
+
+    def perform_action_click(self, obj: Atspi.Accessible) -> bool:
+        try:
+            action = obj.get_action_iface()
+            if not action:
+                return False
+            if action.get_n_actions() < 1:
+                return False
+            return action.do_action(0)
+        except Exception as e:
+            logger.debug(f"Action click failed: {e}")
+            return False
 
 if __name__ == "__main__":
     # Test run

@@ -10,6 +10,9 @@ class InputController:
         self.ui = None
         self._setup_uinput()
 
+    def is_available(self):
+        return self.ui is not None
+
     def _setup_uinput(self):
         """
         Sets up the uinput device.

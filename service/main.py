@@ -27,46 +27,38 @@ class ServiceApp:
 
     def handle_request(self, request):
         cmd = request.get('command')
-        
+        params = request.get('params') or {}
+
         if cmd == 'SCAN':
             logger.info("Scanning for elements...")
             elements = self.scanner.get_clickable_elements()
-            
+
             # Cache elements to handle clicks later
             self.active_elements = {str(e['id']): e for e in elements}
-            
+
             return {'status': 'success', 'elements': elements}
-        
+
         elif cmd == 'CLICK':
-            target_id = str(request.get('id'))
+            target_id = str(params.get('id'))
             element = self.active_elements.get(target_id)
             if element:
                 logger.info(f"Clicking element: {element['name']} at {element['x']}, {element['y']}")
-                
-                # Calculate center
-                cx = element['x'] + element['w'] // 2
-                cy = element['y'] + element['h'] // 2
-                
-                # Move and click
-                # TODO: InputController needs robust move logic
-                # self.input.move_mouse(cx, cy)
-                # self.input.click()
-                
-                # For now, if we can't move mouse reliably, maybe we can use AT-SPI actions?
-                # But 'click' action in AT-SPI is Component.grab_focus + perform_action
-                # Let's try to find the object in scanner via some ID and invoke action?
-                # That's hard because 'id' is hash.
-                
-                return {'status': 'success'}
-            else:
-                return {'status': 'error', 'message': 'Element not found'}
-                
+
+                obj = self.scanner.get_object_by_id(target_id)
+                if obj and self.scanner.perform_action_click(obj):
+                    return {'status': 'success'}
+
+                return {'status': 'error', 'message': 'Click action unavailable'}
+            return {'status': 'error', 'message': 'Element not found'}
+
         elif cmd == 'SCROLL':
-            direction = request.get('direction', 'down')
+            direction = params.get('direction', 'down')
             logger.info(f"Scrolling {direction}")
+            if not self.input.is_available():
+                return {'status': 'error', 'message': 'Input device unavailable'}
             self.input.scroll(direction)
             return {'status': 'success'}
-            
+
         elif cmd == 'PING':
             return {'status': 'pong'}
 
