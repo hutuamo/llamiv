@@ -30,3 +30,8 @@
     - [ ] Create installation script (optional, README provided)
     - [ ] Add configuration settings (colors, keys) - *Basic schema added*
     - [ ] Testing on GNOME 46+ (Wayland)
+
+- [ ] **Phase 6: Quality & Verification**
+    - [ ] 清理 LSP 警告（类型注解、隐式相对导入、未使用变量）
+    - [ ] 在 GNOME 46+ Wayland 环境做端到端验证（Hint/Click/Scroll/IPC）
+    - [ ] 处理中低优先级问题（多显示器坐标、Hint 上限、分批渲染）
